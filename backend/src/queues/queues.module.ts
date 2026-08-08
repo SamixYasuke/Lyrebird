@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
+import { buildRedisConnection } from '@/redis/redis-config';
 
 export const TELEGRAM_UPDATES_QUEUE = 'telegram-updates';
 
@@ -9,10 +10,7 @@ export const TELEGRAM_UPDATES_QUEUE = 'telegram-updates';
     BullModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
-        connection: {
-          host: config.getOrThrow<string>('REDIS_HOST'),
-          port: config.getOrThrow<number>('REDIS_PORT'),
-        },
+        connection: buildRedisConnection(config),
       }),
     }),
     BullModule.registerQueue({

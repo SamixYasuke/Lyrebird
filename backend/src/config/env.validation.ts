@@ -8,6 +8,7 @@ import {
   IsString,
   Max,
   Min,
+  ValidateIf,
 } from 'class-validator';
 
 export function validate(config: Record<string, unknown>) {
@@ -33,35 +34,60 @@ export class EnvironmentVariables {
   @Max(65535)
   PORT: number;
 
+  @ValidateIf((o: EnvironmentVariables) => !o.DATABASE_URL)
   @IsString()
   @IsNotEmpty()
   DB_HOST: string;
 
+  @ValidateIf((o: EnvironmentVariables) => !o.DATABASE_URL)
   @Type(() => Number)
   @IsInt()
   @Min(0)
   @Max(65535)
   DB_PORT: number;
 
+  @ValidateIf((o: EnvironmentVariables) => !o.DATABASE_URL)
   @IsString()
   DB_USER: string;
 
+  @ValidateIf((o: EnvironmentVariables) => !o.DATABASE_URL)
   @IsString()
   DB_PASSWORD: string;
 
+  @ValidateIf((o: EnvironmentVariables) => !o.DATABASE_URL)
   @IsString()
   @IsNotEmpty()
   DB_NAME: string;
 
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  DATABASE_URL?: string;
+
+  @IsOptional()
+  @IsString()
+  DB_SSL?: string;
+
+  @IsOptional()
+  @IsString()
+  DB_SYNCHRONIZE?: string;
+
+  @ValidateIf((o: EnvironmentVariables) => !o.REDIS_URL)
   @IsString()
   @IsNotEmpty()
   REDIS_HOST: string;
 
+  @ValidateIf((o: EnvironmentVariables) => !o.REDIS_URL)
   @Type(() => Number)
   @IsInt()
   @Min(0)
   @Max(65535)
   REDIS_PORT: number;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  REDIS_URL?: string;
 
   @IsOptional()
   @IsString()

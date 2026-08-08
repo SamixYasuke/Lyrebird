@@ -1,6 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
+import { buildRedisConnection } from '@/redis/redis-config';
 
 export const REDIS_CLIENT = 'REDIS_CLIENT';
 
@@ -13,10 +14,7 @@ export type RedisClient = Redis;
       provide: REDIS_CLIENT,
       inject: [ConfigService],
       useFactory: (config: ConfigService) =>
-        new Redis({
-          host: config.getOrThrow<string>('REDIS_HOST'),
-          port: config.getOrThrow<number>('REDIS_PORT'),
-        }),
+        new Redis(buildRedisConnection(config)),
     },
   ],
   exports: [REDIS_CLIENT],

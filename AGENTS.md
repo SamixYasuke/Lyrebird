@@ -32,9 +32,9 @@ unnamed/
 ├── backend/    # NestJS API + workers
 │   └── src/
 │       ├── config/       # env validation (class-validator)
-│       ├── database/     # TypeORM module (Postgres), synchronize:true in dev
-│       ├── redis/        # @Global() module providing REDIS_CLIENT (ioredis)
-│       ├── queues/       # BullMQ: forRootAsync + telegram-updates queue
+│       ├── database/     # TypeORM module (Postgres) — `DATABASE_URL` or host/port, `DB_SYNCHRONIZE` (default true in dev), `DB_SSL` for Neon/Supabase
+│       ├── redis/        # @Global() module providing REDIS_CLIENT (ioredis) — `REDIS_URL` (rediss:// TLS) or host/port via redis-config.ts
+│       ├── queues/       # BullMQ: forRootAsync + telegram-updates queue (same redis-config helper)
 │       ├── tenants/      # TenantEntity + ServiceEntity, onboarding API (tenants.service/controller, DTOs, AdminKeyGuard)
 │       ├── agents/       # agent-tool.ts, agent.types.ts, openapi-parser, llm, tool-executor, agent-loop, tool-provider (agents.module)
 │       ├── security/     # CryptoService (AES-256-GCM at rest for tenant credentials), SecurityModule
@@ -115,6 +115,7 @@ Local dev notes:
 - `PUBLIC_BASE_URL` must be set to a public HTTPS URL (ngrok) to register services end-to-end; without it, `createService` returns 400.
 - `ADMIN_API_KEY` is optional: if set, all `/tenants*` routes require the `X-Admin-Key` header; if unset they are open (dev only).
 - `SESSION_TOKEN_BUDGET` (tokens, default 3000) governs when sessions summarize old messages via the LLM; summarization needs `OPENROUTER_API_KEY`.
+- Cloud ready (2026-08-08): Postgres takes a full `DATABASE_URL` (else host/port) — set `DB_SSL=true` for Neon/Supabase and `DB_SYNCHRONIZE=false` in prod (default `true` unless explicitly `"false"`). Redis takes a `REDIS_URL` (ioredis options built by `src/redis/redis-config.ts`, used by both `RedisModule` and BullMQ) — Upstash is TLS-only `rediss://`; when `REDIS_URL` is set, `REDIS_HOST`/`REDIS_PORT` are ignored (env validation is `@ValidateIf`-conditional). Local `backend/.env` keeps host/port + a commented cloud override block.
 - `DATA_ENCRYPTION_KEY` is **required** at boot (env validation fails without it). Any string works — it is SHA-256-derived into the AES-256-GCM key. Generate one with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` and put it in `backend/.env`. It encrypts `openapiSpec`/`botToken`/`authHeaderValue` at rest; lose it and those rows can't be decrypted.
 
 Onboarding flow (end-to-end):
