@@ -23,7 +23,10 @@ describe('TelegramUpdatesProcessor', () => {
     setPendingConfirmation: jest.fn(),
   };
   const agent = { run: jest.fn() };
-  const telegram = { sendMessage: jest.fn() };
+  const telegram = {
+    sendMessage: jest.fn(),
+    sendChatAction: jest.fn(),
+  };
   const llm = { chat: jest.fn() };
   const config = {
     get: jest.fn((key: string) =>
@@ -66,6 +69,7 @@ describe('TelegramUpdatesProcessor', () => {
     sessions.getPendingConfirmation.mockResolvedValue(null);
     agent.run.mockResolvedValue({ reply: 'Order 5 is shipped.' });
     telegram.sendMessage.mockResolvedValue(true);
+    telegram.sendChatAction.mockResolvedValue(true);
 
     const module = await Test.createTestingModule({
       providers: [

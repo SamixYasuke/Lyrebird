@@ -114,4 +114,23 @@ describe('TelegramApiService', () => {
       service.setWebhook('123:ABC', 'https://example.com/webhook'),
     ).resolves.toBe(false);
   });
+
+  it('sendChatAction posts typing to the correct bot endpoint', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true, result: true }),
+    });
+
+    await expect(service.sendChatAction('123:ABC', 42)).resolves.toBe(true);
+
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.telegram.org/bot123:ABC/sendChatAction');
+    expect(JSON.parse(init.body)).toEqual({ chat_id: 42, action: 'typing' });
+  });
+
+  it('sendChatAction returns false on a network error', async () => {
+    mockFetch.mockRejectedValue(new Error('ENOTFOUND'));
+
+    await expect(service.sendChatAction('123:ABC', 42)).resolves.toBe(false);
+  });
 });

@@ -12,6 +12,7 @@ import {
 } from '@/agents/agent-loop.service';
 import { LlmService } from '@/agents/llm.service';
 import { ToolProviderService } from '@/agents/tool-provider.service';
+import type { AgentTool } from '@/agents/agent-tool';
 import { CryptoService } from '@/security/crypto.service';
 import {
   PendingConfirmation,
@@ -72,6 +73,12 @@ const DECLINE_PHRASES = new Set([
 
 const MAX_CONFIRM_ASKS = 3;
 
+const TYPOGRAPHIC_DASHES = /[\u00ad\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/g;
+
+function normalizeText(text: string): string {
+  return text.replace(TYPOGRAPHIC_DASHES, '-');
+}
+
 const DECLINE_NOTE =
   'The user declined the pending action. Do NOT call any mutation tools. Acknowledge the cancellation and offer alternatives.';
 
@@ -100,6 +107,8 @@ export class TelegramUpdatesProcessor extends WorkerHost {
     const message = update.message;
     if (!message?.text || !message.chat) return;
 
+    const text = normalizeText(message.text);
+
     const service = await this.services.findOne({ where: { id: serviceId } });
     if (!service) {
       this.logger.warn(`Service ${serviceId} not found`);
@@ -111,11 +120,34 @@ export class TelegramUpdatesProcessor extends WorkerHost {
       this.crypto.decrypt(service.openapiSpec) ?? '',
     );
     const chatId = message.chat.id;
-    const state = await this.sessions.getSession(serviceId, chatId);
-    const userMessage = { role: 'user' as const, content: message.text };
+    const botToken = this.crypto.decrypt(service.botToken) ?? '';
+    const typing = this.startTyping(botToken, chatId);
+    try {
+      await this.runPipeline(service, tools, text, chatId, botToken);
+    } finally {
+      clearInterval(typing);
+    }
+  }
+
+  private startTyping(botToken: string, chatId: number): NodeJS.Timeout {
+    void this.telegram.sendChatAction(botToken, chatId);
+    return setInterval(() => {
+      void this.telegram.sendChatAction(botToken, chatId);
+    }, 4000);
+  }
+
+  private async runPipeline(
+    service: ServiceEntity,
+    tools: AgentTool[],
+    text: string,
+    chatId: number,
+    botToken: string,
+  ): Promise<void> {
+    const state = await this.sessions.getSession(service.id, chatId);
+    const userMessage = { role: 'user' as const, content: text };
 
     const pending = await this.sessions.getPendingConfirmation(
-      serviceId,
+      service.id,
       chatId,
     );
     const runMessages: ChatMessage[] = [
@@ -146,7 +178,7 @@ export class TelegramUpdatesProcessor extends WorkerHost {
     let directReply: string | null = null;
 
     if (pending) {
-      const intent = await this.decideConfirmIntent(pending, message.text);
+      const intent = await this.decideConfirmIntent(pending, text);
       if (intent === 'confirm') {
         pendingMutations = [pending.toolCall];
       } else if (intent === 'decline') {
@@ -187,27 +219,23 @@ export class TelegramUpdatesProcessor extends WorkerHost {
     }
 
     if (result.pendingToolCall) {
-      await this.sessions.setPendingConfirmation(serviceId, chatId, {
+      await this.sessions.setPendingConfirmation(service.id, chatId, {
         toolCall: result.pendingToolCall,
         summary: result.confirmationSummary,
         askCount: 0,
       });
     } else if (keptPending) {
-      await this.sessions.setPendingConfirmation(serviceId, chatId, keptPending);
+      await this.sessions.setPendingConfirmation(service.id, chatId, keptPending);
     } else {
-      await this.sessions.setPendingConfirmation(serviceId, chatId, null);
+      await this.sessions.setPendingConfirmation(service.id, chatId, null);
     }
 
-    await this.sessions.append(serviceId, chatId, userMessage, {
+    await this.sessions.append(service.id, chatId, userMessage, {
       role: 'assistant',
       content: result.reply,
     });
 
-    await this.telegram.sendMessage(
-      this.crypto.decrypt(service.botToken) ?? '',
-      chatId,
-      result.reply,
-    );
+    await this.telegram.sendMessage(botToken, chatId, result.reply);
   }
 
   private async decideConfirmIntent(
