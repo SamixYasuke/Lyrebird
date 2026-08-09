@@ -108,10 +108,6 @@ export class EnvironmentVariables {
   PUBLIC_BASE_URL?: string;
 
   @IsOptional()
-  @IsString()
-  ADMIN_API_KEY?: string;
-
-  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(100)
@@ -120,4 +116,8 @@ export class EnvironmentVariables {
   @IsString()
   @IsNotEmpty()
   DATA_ENCRYPTION_KEY: string;
+
+  @IsString()
+  @IsNotEmpty()
+  JWT_SECRET: string;
 }

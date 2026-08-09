@@ -5,10 +5,12 @@ Lyrebird's Vite + React + TypeScript + Tailwind v4 app — the marketing landing
 ## What lives here
 
 - `src/components/` — landing sections (Nav, Hero with animated chat, HowItWorks, Safety, Pricing, FAQ, CTA, Footer) + shared bits (Logo, Reveal)
+- `src/components/auth/` — RequireAuth (route guard)
 - `src/components/dashboard/` — DashboardHeader, Modal, SystemMap (React Flow graph of a service's endpoints), BotFatherGuide
-- `src/pages/` — Dashboard (tenant list) and TenantDetail (services + map), `React.lazy`-loaded so the landing bundle stays lean
-- `src/api/client.ts` — axios instance + typed endpoints; base URL from `VITE_API_BASE_URL`
-- `src/lib/` — helpers (spec counting, token masking, theme persistence)
+- `src/store/` — zustand stores (auth: JWT session state)
+- `src/pages/` — Auth (login/signup at `/auth`), Dashboard (workspace), and TenantDetail (services + map), `React.lazy`-loaded so the landing bundle stays lean
+- `src/api/client.ts` — axios instance + typed endpoints (authApi, tenantsApi); base URL from `VITE_API_BASE_URL`, sends `Authorization: Bearer <token>`
+- `src/lib/` — helpers (auth token storage, spec counting, token masking, theme persistence)
 - `src/index.css` — the brand system as Tailwind v4 `@theme` tokens (warm editorial: paper/ink/coral/leaf), dark mode pairs, keyframes
 
 ## Running
@@ -25,4 +27,4 @@ yarn build      # tsc -b + vite build
 yarn lint       # oxlint
 ```
 
-Routes: `/` (landing), `/app` (dashboard), `/app/tenants/:tenantId` (service detail + map). Optional `VITE_API_BASE_URL` overrides the API origin (default `http://localhost:3000`); the admin API key lives in `localStorage['lyrebird_admin_key']`, editable in the dashboard header.
+Routes: `/` (landing), `/auth` (sign up / sign in), `/app` (workspace), `/app/tenants/:tenantId` (service detail + map). Optional `VITE_API_BASE_URL` overrides the API origin (default `http://localhost:3000`). The console is JWT-based: sign in at `/auth`, the session (token + user + tenant) lives in `localStorage['lyrebird_auth']` (zustand store in `src/store/auth.ts`), `/app*` is guarded by `RequireAuth`, and a 401 from the API clears the session and returns you to `/auth`.

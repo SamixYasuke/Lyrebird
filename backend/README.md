@@ -4,7 +4,8 @@ Lyrebird's NestJS API + background workers. See the [root README](../README.md) 
 
 ## What lives here
 
-- `src/tenants/` — onboarding API (tenants & services), `AdminKeyGuard`, boot-time encryption migrator
+- `src/auth/` — JWT auth: signup/login/me, scrypt password hashing, `JwtAuthGuard`
+- `src/tenants/` — onboarding API (tenants & services, JWT-guarded, per-user scoping), boot-time encryption migrator
 - `src/agents/` — OpenAPI → tools parser, OpenRouter LLM client, tool executor (HTTP + auth injection), the agent loop, cached tool provider
 - `src/sessions/` — Redis session state, token budget + LLM summarization, pending confirmations
 - `src/telegram/` — webhook controller, route-by-token-hash service, BullMQ processor, Telegram API client, Markdown→HTML renderer

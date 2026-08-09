@@ -4,6 +4,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Cancel01Icon, Menu01Icon } from "@hugeicons/core-free-icons";
 import { Logo } from "@/components/Logo";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { useAuth } from "@/store/auth";
 
 const links = [
   { href: "#how", label: "How it works" },
@@ -14,6 +15,7 @@ const links = [
 ];
 
 export function Nav() {
+  const { user } = useAuth();
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
 
@@ -47,18 +49,21 @@ export function Nav() {
         </nav>
         <div className="hidden items-center gap-3 md:flex">
           <ThemeToggle />
-          <Link
-            to="/app"
-            className="rounded-full border border-line bg-cream px-4 py-2 text-sm font-medium transition-colors hover:border-ink/30"
-          >
-            Console
-          </Link>
-          <Link
-            to="/app"
-            className="rounded-full bg-coral px-4 py-2 text-sm font-semibold text-cream-solid transition-colors hover:bg-coral-deep"
-          >
-            Get started
-          </Link>
+          {user ? (
+            <Link
+              to="/app"
+              className="rounded-full border border-line bg-cream px-4 py-2 text-sm font-medium transition-colors hover:border-ink/30"
+            >
+              Console
+            </Link>
+          ) : (
+            <Link
+              to="/auth"
+              className="rounded-full bg-coral px-4 py-2 text-sm font-semibold text-cream-solid transition-colors hover:bg-coral-deep"
+            >
+              Get started
+            </Link>
+          )}
         </div>
         <button
           type="button"
@@ -90,20 +95,23 @@ export function Nav() {
               {l.label}
             </a>
           ))}
-          <Link
-            to="/app"
-            onClick={() => setOpen(false)}
-            className="block border-b border-line/60 py-3 text-sm text-ink/80 last:border-0"
-          >
-            Console
-          </Link>
-          <Link
-            to="/app"
-            onClick={() => setOpen(false)}
-            className="mt-4 block rounded-full bg-coral px-4 py-2.5 text-center text-sm font-semibold text-cream-solid"
-          >
-            Get started
-          </Link>
+          {user ? (
+            <Link
+              to="/app"
+              onClick={() => setOpen(false)}
+              className="block border-b border-line/60 py-3 text-sm text-ink/80 last:border-0"
+            >
+              Console
+            </Link>
+          ) : (
+            <Link
+              to="/auth"
+              onClick={() => setOpen(false)}
+              className="mt-4 block rounded-full bg-coral px-4 py-2.5 text-center text-sm font-semibold text-cream-solid"
+            >
+              Get started
+            </Link>
+          )}
         </nav>
       ) : null}
     </header>

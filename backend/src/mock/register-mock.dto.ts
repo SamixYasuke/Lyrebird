@@ -2,10 +2,6 @@ import { IsNotEmpty, IsOptional, IsString, Matches } from 'class-validator';
 
 export class RegisterMockDto {
   @IsString()
-  @IsNotEmpty()
-  tenantId: string;
-
-  @IsString()
   @Matches(/^\d{6,}:[A-Za-z0-9_-]+$/, {
     message: 'botToken must look like a Telegram bot token (digits:token)',
   })

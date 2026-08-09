@@ -11,9 +11,11 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { AdminKeyGuard } from '@/tenants/admin-key.guard';
+import { JwtAuthGuard } from '@/auth/jwt-auth.guard';
+import { CurrentUser } from '@/auth/current-user.decorator';
 import { MockService } from '@/mock/mock.service';
 import { RegisterMockDto } from '@/mock/register-mock.dto';
+import type { UserEntity } from '@/auth/user.entity';
 
 @Controller('mock')
 export class MockController {
@@ -32,9 +34,13 @@ export class MockController {
   }
 
   @Post(':slug/register')
-  @UseGuards(AdminKeyGuard)
-  register(@Param('slug') slug: string, @Body() dto: RegisterMockDto) {
-    return this.mock.register(slug, dto);
+  @UseGuards(JwtAuthGuard)
+  register(
+    @CurrentUser() user: UserEntity,
+    @Param('slug') slug: string,
+    @Body() dto: RegisterMockDto,
+  ) {
+    return this.mock.register(slug, dto, user);
   }
 
   @All(':slug/*path')

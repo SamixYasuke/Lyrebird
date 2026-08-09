@@ -9,6 +9,7 @@ import {
 import { TenantsService } from '@/tenants/tenants.service';
 import { TenantEntity } from '@/tenants/tenant.entity';
 import { ServiceEntity } from '@/tenants/service.entity';
+import { UserEntity } from '@/auth/user.entity';
 import { CryptoService } from '@/security/crypto.service';
 import { OpenApiParserService } from '@/agents/openapi-parser.service';
 import { ToolProviderService } from '@/agents/tool-provider.service';
@@ -29,6 +30,9 @@ describe('TenantsService', () => {
     save: jest.fn(),
     delete: jest.fn(),
   };
+  const usersRepo = {
+    findOne: jest.fn(),
+  };
   const parser = { parse: jest.fn() };
   const tools = { invalidate: jest.fn() };
   const telegram = { getMe: jest.fn(), setWebhook: jest.fn() };
@@ -44,6 +48,7 @@ describe('TenantsService', () => {
     ),
   };
 
+  const user = { id: 'user-1', tenantId: 'tenant-1' } as UserEntity;
   const tenant = { id: 'tenant-1', name: 'Acme' } as TenantEntity;
 
   const serviceDto = {
@@ -57,6 +62,7 @@ describe('TenantsService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    usersRepo.findOne.mockResolvedValue(user);
     tenantsRepo.findOne.mockResolvedValue(tenant);
     parser.parse.mockResolvedValue([{ function: { name: 'getOrder' } }]);
     telegram.getMe.mockResolvedValue({ ok: true, username: 'shop_bot' });
@@ -70,6 +76,7 @@ describe('TenantsService', () => {
         TenantsService,
         { provide: getRepositoryToken(TenantEntity), useValue: tenantsRepo },
         { provide: getRepositoryToken(ServiceEntity), useValue: servicesRepo },
+        { provide: getRepositoryToken(UserEntity), useValue: usersRepo },
         { provide: OpenApiParserService, useValue: parser },
         { provide: ToolProviderService, useValue: tools },
         { provide: TelegramApiService, useValue: telegram },
@@ -81,24 +88,29 @@ describe('TenantsService', () => {
     service = module.get(TenantsService);
   });
 
-  it('creates a tenant', async () => {
-    tenantsRepo.create.mockReturnValue({ name: 'Acme' });
-    tenantsRepo.save.mockImplementation(async (t) => ({
-      id: 'tenant-1',
-      ...t,
-    }));
+  it('lists only the current user\u2019s tenant', async () => {
+    usersRepo.findOne.mockResolvedValue({
+      id: 'user-1',
+      tenant: { id: 'tenant-1', name: 'Acme', services: [] },
+    });
 
-    const result = await service.createTenant({ name: 'Acme' });
+    const result = await service.listTenants('user-1');
 
-    expect(tenantsRepo.create).toHaveBeenCalledWith({ name: 'Acme' });
-    expect(result.id).toBe('tenant-1');
+    expect(usersRepo.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'user-1' },
+        relations: { tenant: { services: true } },
+      }),
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('tenant-1');
   });
 
   it('registers a service: validates spec + bot, sets webhook, saves', async () => {
     servicesRepo.create.mockImplementation((dto) => ({ id: 'svc-1', ...dto }));
     servicesRepo.save.mockImplementation(async (s) => s);
 
-    const result = await service.createService('tenant-1', serviceDto);
+    const result = await service.createService('user-1', 'tenant-1', serviceDto);
 
     expect(parser.parse).toHaveBeenCalledWith('openapi: 3.0.0');
     expect(telegram.getMe).toHaveBeenCalledWith('123456:ABC-def_GH');
@@ -127,9 +139,9 @@ describe('TenantsService', () => {
   it('rejects an invalid OpenAPI spec before touching Telegram', async () => {
     parser.parse.mockRejectedValue(new Error('missing "paths"'));
 
-    await expect(service.createService('tenant-1', serviceDto)).rejects.toThrow(
-      BadRequestException,
-    );
+    await expect(
+      service.createService('user-1', 'tenant-1', serviceDto),
+    ).rejects.toThrow(BadRequestException);
     expect(telegram.getMe).not.toHaveBeenCalled();
     expect(servicesRepo.save).not.toHaveBeenCalled();
   });
@@ -137,9 +149,9 @@ describe('TenantsService', () => {
   it('rejects an invalid bot token', async () => {
     telegram.getMe.mockResolvedValue({ ok: false });
 
-    await expect(service.createService('tenant-1', serviceDto)).rejects.toThrow(
-      BadRequestException,
-    );
+    await expect(
+      service.createService('user-1', 'tenant-1', serviceDto),
+    ).rejects.toThrow(BadRequestException);
     expect(telegram.setWebhook).not.toHaveBeenCalled();
     expect(servicesRepo.save).not.toHaveBeenCalled();
   });
@@ -147,9 +159,9 @@ describe('TenantsService', () => {
   it('rejects when PUBLIC_BASE_URL is not configured', async () => {
     config.get.mockReturnValue(undefined);
 
-    await expect(service.createService('tenant-1', serviceDto)).rejects.toThrow(
-      BadRequestException,
-    );
+    await expect(
+      service.createService('user-1', 'tenant-1', serviceDto),
+    ).rejects.toThrow(BadRequestException);
     expect(telegram.setWebhook).not.toHaveBeenCalled();
     expect(servicesRepo.save).not.toHaveBeenCalled();
   });
@@ -157,28 +169,32 @@ describe('TenantsService', () => {
   it('rejects when the webhook cannot be registered', async () => {
     telegram.setWebhook.mockResolvedValue(false);
 
-    await expect(service.createService('tenant-1', serviceDto)).rejects.toThrow(
-      BadRequestException,
-    );
+    await expect(
+      service.createService('user-1', 'tenant-1', serviceDto),
+    ).rejects.toThrow(BadRequestException);
     expect(servicesRepo.save).not.toHaveBeenCalled();
   });
 
-  it('rejects when the tenant does not exist', async () => {
-    tenantsRepo.findOne.mockResolvedValue(null);
+  it('rejects when the tenant does not belong to the user', async () => {
+    usersRepo.findOne.mockResolvedValue({
+      id: 'user-1',
+      tenantId: 'someone-elses-tenant',
+    });
 
-    await expect(service.createService('missing', serviceDto)).rejects.toThrow(
-      NotFoundException,
-    );
+    await expect(
+      service.createService('user-1', 'tenant-1', serviceDto),
+    ).rejects.toThrow(NotFoundException);
     expect(parser.parse).not.toHaveBeenCalled();
+    expect(telegram.getMe).not.toHaveBeenCalled();
   });
 
   it('reports a duplicate bot token as a conflict', async () => {
     servicesRepo.create.mockImplementation((dto) => ({ id: 'svc-1', ...dto }));
     servicesRepo.save.mockRejectedValue(new Error('duplicate key'));
 
-    await expect(service.createService('tenant-1', serviceDto)).rejects.toThrow(
-      ConflictException,
-    );
+    await expect(
+      service.createService('user-1', 'tenant-1', serviceDto),
+    ).rejects.toThrow(ConflictException);
   });
 
   it('lists services for a tenant, decrypting and masking secrets', async () => {
@@ -192,7 +208,9 @@ describe('TenantsService', () => {
       },
     ]);
 
-    await expect(service.listServices('tenant-1')).resolves.toEqual([
+    await expect(
+      service.listServices('user-1', 'tenant-1'),
+    ).resolves.toEqual([
       {
         id: 'svc-1',
         openapiSpec: 'openapi: 3.0.0',
@@ -218,7 +236,7 @@ describe('TenantsService', () => {
     servicesRepo.findOne.mockResolvedValue(row);
     servicesRepo.save.mockImplementation(async (s) => s);
 
-    const result = await service.updateService('tenant-1', 'svc-1', {
+    const result = await service.updateService('user-1', 'tenant-1', 'svc-1', {
       name: 'New name',
       baseUrl: 'https://new.example.com',
       authHeaderValue: 'fresh-secret',
@@ -240,7 +258,7 @@ describe('TenantsService', () => {
     parser.parse.mockRejectedValue(new Error('missing "paths"'));
 
     await expect(
-      service.updateService('tenant-1', 'svc-1', {
+      service.updateService('user-1', 'tenant-1', 'svc-1', {
         openapiSpec: 'openapi: 3.0.0',
       }),
     ).rejects.toThrow(BadRequestException);
@@ -252,15 +270,15 @@ describe('TenantsService', () => {
     servicesRepo.findOne.mockResolvedValue(null);
 
     await expect(
-      service.updateService('tenant-1', 'missing', { name: 'X' }),
+      service.updateService('user-1', 'tenant-1', 'missing', { name: 'X' }),
     ).rejects.toThrow(NotFoundException);
   });
 
   it('throws when deleting a service that does not exist', async () => {
     servicesRepo.delete.mockResolvedValue({ affected: 0 });
 
-    await expect(service.deleteService('tenant-1', 'missing')).rejects.toThrow(
-      NotFoundException,
-    );
+    await expect(
+      service.deleteService('user-1', 'tenant-1', 'missing'),
+    ).rejects.toThrow(NotFoundException);
   });
 });

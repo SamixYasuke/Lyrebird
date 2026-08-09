@@ -1,23 +1,17 @@
-import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { HugeiconsIcon } from '@hugeicons/react'
-import { RefreshIcon } from '@hugeicons/core-free-icons'
+import { Logout01Icon } from '@hugeicons/core-free-icons'
 import { LogoMark } from '@/components/Logo'
 import { ThemeToggle } from '@/components/ThemeToggle'
-import { getDeviceKey, maskKey, resetDeviceKey } from '@/lib/device'
+import { useAuth } from '@/store/auth'
 
 export function DashboardHeader() {
-  const [deviceKey, setDeviceKey] = useState(() => getDeviceKey())
+  const { user, tenant, logout } = useAuth()
+  const navigate = useNavigate()
 
-  const regenerate = () => {
-    if (
-      !window.confirm(
-        "Reset this browser's device key? With no real auth, this key is the only thing identifying this browser as an admin.",
-      )
-    ) {
-      return
-    }
-    setDeviceKey(resetDeviceKey())
+  const signOut = () => {
+    logout()
+    navigate('/')
   }
 
   return (
@@ -34,28 +28,21 @@ export function DashboardHeader() {
         <div className="flex shrink-0 items-center gap-2.5">
           <div className="hidden items-center gap-2 rounded-full border border-line bg-cream px-3.5 py-2 sm:flex">
             <span className="h-1.5 w-1.5 rounded-full bg-leaf" />
-            <span className="font-mono text-[10px] tracking-[0.1em] text-ink-soft uppercase">device key</span>
-            <span className="font-mono text-[11px] text-ink" title={deviceKey}>
-              {maskKey(deviceKey)}
+            <span className="max-w-40 truncate font-mono text-[11px] text-ink" title={user?.email}>
+              {tenant?.name ?? user?.email}
             </span>
-            <button
-              type="button"
-              onClick={regenerate}
-              aria-label="Reset device key"
-              title="Reset device key"
-              className="flex h-5 w-5 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-paper-2 hover:text-ink"
-            >
-              <HugeiconsIcon icon={RefreshIcon} size={11} strokeWidth={1.5} absoluteStrokeWidth aria-hidden="true" />
-            </button>
+            <span className="max-w-44 truncate font-mono text-[11px] text-ink-soft" title={user?.email}>
+              {user?.email}
+            </span>
           </div>
           <button
             type="button"
-            onClick={regenerate}
-            aria-label="Reset device key"
-            title="Reset device key"
-            className="flex h-9 w-9 items-center justify-center rounded-full border border-line bg-cream text-ink-soft transition-colors hover:text-ink sm:hidden"
+            onClick={signOut}
+            aria-label="Sign out"
+            title="Sign out"
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-line bg-cream text-ink-soft transition-colors hover:border-coral/40 hover:text-coral-deep"
           >
-            <HugeiconsIcon icon={RefreshIcon} size={14} strokeWidth={1.5} absoluteStrokeWidth aria-hidden="true" />
+            <HugeiconsIcon icon={Logout01Icon} size={14} strokeWidth={1.5} absoluteStrokeWidth aria-hidden="true" />
           </button>
           <ThemeToggle />
           <Link

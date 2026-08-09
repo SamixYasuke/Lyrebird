@@ -143,7 +143,7 @@ export function Hero() {
             style={{ animationDelay: "270ms" }}
           >
             <a
-              href="#cta"
+              href="/app"
               className="group inline-flex items-center gap-2 rounded-full bg-coral px-6 py-3 text-[15px] font-semibold text-cream-solid transition-colors hover:bg-coral-deep"
             >
               Start free

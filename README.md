@@ -94,7 +94,7 @@ Backend (`backend/.env`):
 | `OPENROUTER_API_KEY` | for real answers | — | OpenRouter key used for agent replies, the confirmation judge, and session summaries |
 | `OPENROUTER_MODEL` | — | `nvidia/nemotron-3-nano-30b-a3b:free` | Primary model (validated for tool calling) |
 | `OPENROUTER_FALLBACK_MODEL` | — | `google/gemma-4-26b-a4b-it:free` | Used when the primary retries/errors or returns an empty reply |
-| `ADMIN_API_KEY` | — | unset | If set, every `/tenants*` route requires the `X-Admin-Key` header; if unset they're open (dev only) |
+| `JWT_SECRET` | **yes** | — | Secret that signs the 7-day JWT auth tokens. Generate one with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
 | `SESSION_TOKEN_BUDGET` | — | `3000` | When a chat's context exceeds this many tokens (approx chars/4), the oldest half is rolled into an LLM summary |
 
 Frontend (`frontend/.env`): `VITE_API_BASE_URL` (optional, defaults to `http://localhost:3000`).
@@ -131,10 +131,12 @@ Sessions are keyed `session:{serviceId}:{chatId}`; every step stays inside the t
 ## Onboarding flow (connecting a company)
 
 ```
-POST /tenants { name }                      → tenant id
+POST /auth/signup { companyName, email, password }      → token + user + tenant (created atomically)
+POST /auth/login { email, password }                    → token + user + tenant
 POST /tenants/{id}/services {
     name, baseUrl, openapiSpec, botToken,
     authHeaderName?, authHeaderValue? }
+  (Authorization: Bearer <token>; scoped to the caller's tenant)
   1. Parse + validate the OpenAPI spec (fails fast → 400)
   2. getMe(botToken) — is this a real bot?
   3. setWebhook(PUBLIC_BASE_URL/telegram/webhook/{botToken})
@@ -143,7 +145,7 @@ POST /tenants/{id}/services {
 
 One bot per service (1:1 bot token ↔ service). The bot token is the routing key: webhook → bot token hash → service → tenant. No intent routing needed, no extra state.
 
-The dashboard in `frontend/` wraps all of this — create a tenant, add a service (with a built-in BotFather walkthrough for making the bot), and watch the service's endpoints render as a React Flow graph.
+The dashboard in `frontend/` wraps all of this — sign up or sign in, and you land in your company's workspace where you add a service (with a built-in BotFather walkthrough for making the bot) and watch its endpoints render as a React Flow graph.
 
 ## Mutations need a "yes"
 
@@ -175,6 +177,7 @@ All specs declare an `X-API-Key` security scheme, so they also exercise the auth
 
 ## Security
 
+- **Account auth.** The console is JWT-based: signup creates a company + owner atomically, passwords are scrypt-hashed with per-user salts, and sessions last 7 days. Every `/tenants*` route requires `Authorization: Bearer <token>` and only serves the caller's own tenant.
 - **Encryption at rest.** `openapiSpec`, `botToken`, and `authHeaderValue` are stored as AES-256-GCM ciphertext (`v1:iv.tag.ciphertext`, random IV per write) under `DATA_ENCRYPTION_KEY`. A boot-time migrator backfills legacy plaintext rows; `decrypt` passes non-`v1:` values through so mixed states stay safe.
 - **Bot tokens are never queryable.** The raw token is encrypted, and routing uses a deterministic SHA-256 `bot_token_hash` column — the webhook handler hashes the incoming token and looks the service up by hash. Uniqueness is enforced on the hash.
 - **Auth headers never reach the LLM.** The auth value is injected at request-execution time by the tool executor, and masked (`null`) in every API response. The frontend only ever sees `authHeaderName`.
@@ -198,8 +201,10 @@ There are 124 backend unit tests covering the agent loop, confirmation machine, 
 | --- | --- | --- |
 | GET | `/` | API name + status |
 | GET | `/health` | status, uptime, timestamp |
-| POST | `/tenants` | create a tenant (company) |
-| GET | `/tenants` | list tenants (with services) |
+| POST | `/auth/signup` | create a company (tenant + owner user atomically) → token |
+| POST | `/auth/login` | sign in → token |
+| GET | `/auth/me` | profile + fresh token for the current session |
+| GET | `/tenants` | list the caller's tenant (with services) |
 | GET | `/tenants/:id` | tenant + its services |
 | GET | `/tenants/:id/services` | list a tenant's services |
 | POST | `/tenants/:id/services` | register a service (validates spec + bot, sets webhook, saves) |
@@ -208,7 +213,7 @@ There are 124 backend unit tests covering the agent loop, confirmation machine, 
 | POST | `/telegram/webhook/:botToken` | Telegram's webhook entry point (don't call this by hand) |
 | GET | `/mock` · `GET /mock/:slug/openapi.json` · `POST /mock/:slug/register` | dev-only mock helpers |
 
-If `ADMIN_API_KEY` is set, all `/tenants*` routes require the `X-Admin-Key` header.
+Every `/tenants*` route (and `POST /mock/:slug/register`) requires `Authorization: Bearer <token>` and only serves the caller's own tenant.
 
 ## Status
 

@@ -12,10 +12,10 @@ import { OpenApiParserService } from '@/agents/openapi-parser.service';
 import { ToolProviderService } from '@/agents/tool-provider.service';
 import { TelegramApiService } from '@/telegram/telegram-api.service';
 import { CryptoService } from '@/security/crypto.service';
+import { UserEntity } from '@/auth/user.entity';
 import { ServiceEntity } from '@/tenants/service.entity';
 import { TenantEntity } from '@/tenants/tenant.entity';
 import { CreateServiceDto } from '@/tenants/dto/create-service.dto';
-import { CreateTenantDto } from '@/tenants/dto/create-tenant.dto';
 import { UpdateServiceDto } from '@/tenants/dto/update-service.dto';
 
 @Injectable()
@@ -27,6 +27,8 @@ export class TenantsService {
     private readonly tenants: Repository<TenantEntity>,
     @InjectRepository(ServiceEntity)
     private readonly services: Repository<ServiceEntity>,
+    @InjectRepository(UserEntity)
+    private readonly users: Repository<UserEntity>,
     private readonly parser: OpenApiParserService,
     private readonly tools: ToolProviderService,
     private readonly telegram: TelegramApiService,
@@ -34,42 +36,40 @@ export class TenantsService {
     private readonly crypto: CryptoService,
   ) {}
 
-  async createTenant(dto: CreateTenantDto): Promise<TenantEntity> {
-    const tenant = this.tenants.create({ name: dto.name });
-    return this.tenants.save(tenant);
+  async listTenants(userId: string): Promise<TenantEntity[]> {
+    const user = await this.users.findOne({
+      where: { id: userId },
+      relations: { tenant: { services: true } },
+    });
+    if (!user) throw new NotFoundException(`User ${userId} not found`);
+    return [this.serializeTenant(user.tenant)];
   }
 
-  async listTenants(): Promise<TenantEntity[]> {
-    const tenants = await this.tenants.find({ relations: { services: true } });
-    return tenants.map((tenant) => ({
-      ...tenant,
-      services: tenant.services?.map((service) => this.serialize(service)),
-    }));
-  }
-
-  async getTenant(id: string): Promise<TenantEntity> {
+  async getTenant(userId: string, tenantId: string): Promise<TenantEntity> {
+    await this.assertOwned(userId, tenantId);
     const tenant = await this.tenants.findOne({
-      where: { id },
+      where: { id: tenantId },
       relations: { services: true },
     });
-    if (!tenant) throw new NotFoundException(`Tenant ${id} not found`);
-    return {
-      ...tenant,
-      services: tenant.services?.map((service) => this.serialize(service)),
-    };
+    if (!tenant) throw new NotFoundException(`Tenant ${tenantId} not found`);
+    return this.serializeTenant(tenant);
   }
 
-  async listServices(tenantId: string): Promise<ServiceEntity[]> {
-    await this.getTenant(tenantId);
+  async listServices(
+    userId: string,
+    tenantId: string,
+  ): Promise<ServiceEntity[]> {
+    await this.assertOwned(userId, tenantId);
     const services = await this.services.find({ where: { tenantId } });
     return services.map((service) => this.serialize(service));
   }
 
   async createService(
+    userId: string,
     tenantId: string,
     dto: CreateServiceDto,
   ): Promise<ServiceEntity> {
-    await this.getTenant(tenantId);
+    await this.assertOwned(userId, tenantId);
 
     try {
       await this.parser.parse(dto.openapiSpec);
@@ -123,11 +123,12 @@ export class TenantsService {
   }
 
   async updateService(
+    userId: string,
     tenantId: string,
     serviceId: string,
     dto: UpdateServiceDto,
   ): Promise<ServiceEntity> {
-    await this.getTenant(tenantId);
+    await this.assertOwned(userId, tenantId);
     const service = await this.services.findOne({
       where: { id: serviceId, tenantId },
     });
@@ -159,12 +160,30 @@ export class TenantsService {
     return this.serialize(updated);
   }
 
-  async deleteService(tenantId: string, serviceId: string): Promise<void> {
-    await this.getTenant(tenantId);
+  async deleteService(
+    userId: string,
+    tenantId: string,
+    serviceId: string,
+  ): Promise<void> {
+    await this.assertOwned(userId, tenantId);
     const result = await this.services.delete({ id: serviceId, tenantId });
     if (!result.affected) {
       throw new NotFoundException(`Service ${serviceId} not found`);
     }
+  }
+
+  private async assertOwned(userId: string, tenantId: string): Promise<void> {
+    const user = await this.users.findOne({ where: { id: userId } });
+    if (!user || user.tenantId !== tenantId) {
+      throw new NotFoundException(`Tenant ${tenantId} not found`);
+    }
+  }
+
+  private serializeTenant(tenant: TenantEntity): TenantEntity {
+    return {
+      ...tenant,
+      services: tenant.services?.map((service) => this.serialize(service)),
+    };
   }
 
   private serialize(service: ServiceEntity): ServiceEntity {

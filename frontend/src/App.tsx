@@ -1,5 +1,8 @@
 import { Suspense, lazy, useEffect } from "react";
-import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { useAuth } from "@/store/auth";
+import { RequireAuth } from "@/components/auth/RequireAuth";
+import { Auth } from "@/pages/Auth";
 import { Nav } from "@/components/Nav";
 import { Hero } from "@/components/Hero";
 import { Marquee } from "@/components/Marquee";
@@ -54,25 +57,35 @@ function Landing() {
 }
 
 export default function App() {
+  useEffect(() => {
+    void useAuth.getState().hydrate()
+  }, [])
+
   return (
     <BrowserRouter>
       <ScrollToTop />
       <Routes>
         <Route path="/" element={<Landing />} />
+        <Route path="/auth" element={<Auth />} />
+        <Route path="/login" element={<Navigate to="/auth" replace />} />
         <Route
           path="/app"
           element={
-            <Suspense fallback={<AppFallback />}>
-              <Dashboard />
-            </Suspense>
+            <RequireAuth>
+              <Suspense fallback={<AppFallback />}>
+                <Dashboard />
+              </Suspense>
+            </RequireAuth>
           }
         />
         <Route
           path="/app/tenants/:tenantId"
           element={
-            <Suspense fallback={<AppFallback />}>
-              <TenantDetail />
-            </Suspense>
+            <RequireAuth>
+              <Suspense fallback={<AppFallback />}>
+                <TenantDetail />
+              </Suspense>
+            </RequireAuth>
           }
         />
         <Route path="*" element={<Landing />} />

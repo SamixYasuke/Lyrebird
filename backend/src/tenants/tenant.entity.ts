@@ -7,6 +7,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { ServiceEntity } from '@/tenants/service.entity';
+import { UserEntity } from '@/auth/user.entity';
 
 @Entity('tenants')
 export class TenantEntity {
@@ -18,6 +19,9 @@ export class TenantEntity {
 
   @OneToMany(() => ServiceEntity, (service) => service.tenant)
   services: ServiceEntity[];
+
+  @OneToMany(() => UserEntity, (user) => user.tenant)
+  users: UserEntity[];
 
   @CreateDateColumn()
   createdAt: Date;

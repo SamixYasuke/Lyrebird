@@ -9,6 +9,7 @@ import { createMockApis } from '@/mock/mock-data';
 import { MockApi } from '@/mock/mock.types';
 import { RegisterMockDto } from '@/mock/register-mock.dto';
 import { TenantsService } from '@/tenants/tenants.service';
+import type { UserEntity } from '@/auth/user.entity';
 
 @Injectable()
 export class MockService {
@@ -74,7 +75,7 @@ export class MockService {
     };
   }
 
-  async register(slug: string, dto: RegisterMockDto) {
+  async register(slug: string, dto: RegisterMockDto, user: UserEntity) {
     const api = this.apis.get(slug);
     if (!api) throw new NotFoundException(`No mock API "${slug}"`);
     if (!this.tenants) {
@@ -82,7 +83,7 @@ export class MockService {
     }
 
     const port = this.config?.get<number>('PORT') ?? 3000;
-    return this.tenants.createService(dto.tenantId, {
+    return this.tenants.createService(user.id, user.tenantId, {
       name: dto.name ?? api.name,
       baseUrl: `http://127.0.0.1:${port}/mock/${slug}`,
       openapiSpec: JSON.stringify(api.spec),

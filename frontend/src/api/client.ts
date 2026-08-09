@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { getDeviceKey } from '@/lib/device'
+import { clearStoredAuth, getStoredAuth } from '@/lib/auth'
 
 export const api = axios.create({
   baseURL: (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:3000',
@@ -7,9 +7,24 @@ export const api = axios.create({
 })
 
 api.interceptors.request.use((config) => {
-  config.headers.set('X-Admin-Key', getDeviceKey())
+  const auth = getStoredAuth()
+  if (auth?.token) config.headers.set('Authorization', `Bearer ${auth.token}`)
   return config
 })
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (axios.isAxiosError(error) && error.response?.status === 401) {
+      const url = error.config?.url ?? ''
+      if (!url.includes('/auth/login') && !url.includes('/auth/signup')) {
+        clearStoredAuth()
+        window.location.assign('/auth')
+      }
+    }
+    return Promise.reject(error)
+  },
+)
 
 export function getApiError(err: unknown): string {
   if (axios.isAxiosError(err)) {
@@ -19,11 +34,17 @@ export function getApiError(err: unknown): string {
       return Array.isArray(message) ? message.join(' · ') : message
     }
     if (err.response?.status === 401 || err.response?.status === 403) {
-      return 'Forbidden — check the admin API key.'
+      return 'Forbidden — sign in and try again.'
     }
     return err.message
   }
   return err instanceof Error ? err.message : 'Something went wrong'
+}
+
+export interface AuthResult {
+  token: string
+  user: { id: string; email: string }
+  tenant: { id: string; name: string }
 }
 
 export interface Tenant {
@@ -47,10 +68,6 @@ export interface Service {
   updatedAt: string
 }
 
-export interface CreateTenantPayload {
-  name: string
-}
-
 export interface CreateServicePayload {
   name: string
   baseUrl: string
@@ -68,10 +85,16 @@ export interface UpdateServicePayload {
   authHeaderValue?: string
 }
 
+export const authApi = {
+  signup: (payload: { companyName: string; email: string; password: string }) =>
+    api.post<AuthResult>('/auth/signup', payload).then((r) => r.data),
+  login: (payload: { email: string; password: string }) =>
+    api.post<AuthResult>('/auth/login', payload).then((r) => r.data),
+  me: () => api.get<AuthResult>('/auth/me').then((r) => r.data),
+}
+
 export const tenantsApi = {
   list: () => api.get<Tenant[]>('/tenants').then((r) => r.data),
-  create: (payload: CreateTenantPayload) =>
-    api.post<Tenant>('/tenants', payload).then((r) => r.data),
   get: (tenantId: string) => api.get<Tenant>(`/tenants/${tenantId}`).then((r) => r.data),
   services: (tenantId: string) =>
     api.get<Service[]>(`/tenants/${tenantId}/services`).then((r) => r.data),

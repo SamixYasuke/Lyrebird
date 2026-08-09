@@ -4,6 +4,7 @@ import { validate } from '@/config/env.validation';
 import { DatabaseModule } from '@/database/database.module';
 import { RedisModule } from '@/redis/redis.module';
 import { QueuesModule } from '@/queues/queues.module';
+import { AuthModule } from '@/auth/auth.module';
 import { TenantsModule } from '@/tenants/tenants.module';
 import { AgentsModule } from '@/agents/agents.module';
 import { SessionsModule } from '@/sessions/sessions.module';
@@ -21,6 +22,7 @@ import { AppService } from '@/app.service';
     DatabaseModule,
     RedisModule,
     QueuesModule,
+    AuthModule,
     TenantsModule,
     AgentsModule,
     SessionsModule,
