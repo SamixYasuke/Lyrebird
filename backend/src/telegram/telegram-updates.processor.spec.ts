@@ -122,6 +122,19 @@ describe('TelegramUpdatesProcessor', () => {
     );
   });
 
+  it('replies with a graceful fallback when the pipeline throws', async () => {
+    agent.run.mockRejectedValue(new Error('boom'));
+
+    await processor.process(job);
+
+    expect(telegram.sendChatAction).toHaveBeenCalled();
+    expect(telegram.sendMessage).toHaveBeenCalledWith(
+      '123:ABC',
+      42,
+      expect.stringContaining('Something went wrong'),
+    );
+  });
+
   it('prepends the session summary to the agent context', async () => {
     sessions.getSession.mockResolvedValue({
       summary: 'User asked about order 5.',

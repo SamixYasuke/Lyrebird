@@ -12,11 +12,16 @@ describe('MockService', () => {
 
   it('exposes an index of the built-in mocks', () => {
     const index = service.index();
-    expect(index.mocks.map((m) => m.slug)).toEqual(['store', 'stream', 'dispatch']);
+    expect(index.mocks.map((m) => m.slug)).toEqual([
+      'store',
+      'stream',
+      'dispatch',
+      'auth',
+    ]);
     expect(index.mocks.every((m) => m.endpointCount > 0)).toBe(true);
   });
 
-  it.each(['store', 'stream', 'dispatch'])(
+  it.each(['store', 'stream', 'dispatch', 'auth'])(
     'serves a registerable spec for "%s"',
     async (slug) => {
       const api = service.get(slug);
@@ -151,6 +156,110 @@ describe('MockService', () => {
       );
       expect(rated!.status).toBe(200);
       expect((rated!.body as { delivery: { rating: { score: number } } }).delivery.rating.score).toBe(5);
+    });
+  });
+
+  describe('auth', () => {
+    const login = (username: string, password: string) =>
+      service.handle('auth', 'post', '/login', {}, { username, password });
+
+    it('rejects bad credentials', () => {
+      const r = login('alex', 'wrong-password');
+      expect(r!.status).toBe(401);
+      expect((r!.body as { error: string }).error).toContain('Invalid username');
+    });
+
+    it('logs in then reads protected endpoints', () => {
+      const loginRes = login('alex', 'pine42');
+      expect(loginRes!.status).toBe(200);
+      const token = (loginRes!.body as { token: string }).token;
+      expect(token).toMatch(/^tok_/);
+
+      const noAuth = service.handle('auth', 'get', '/accounts', {}, {});
+      expect(noAuth!.status).toBe(401);
+
+      const me = service.handle('auth', 'get', '/me', {}, {}, {
+        authorization: `Bearer ${token}`,
+      });
+      expect(me!.status).toBe(200);
+      expect((me!.body as { username: string }).username).toBe('alex');
+
+      const bare = service.handle('auth', 'get', '/accounts', {}, {}, {
+        authorization: token,
+      });
+      expect(bare!.status).toBe(200);
+      expect((bare!.body as { id: string }[]).length).toBe(2);
+    });
+
+    it('rejects an invalid or missing token', () => {
+      const invalid = service.handle('auth', 'get', '/accounts', {}, {}, {
+        authorization: 'Bearer not-a-real-token',
+      });
+      expect(invalid!.status).toBe(401);
+    });
+
+    it('filters transactions by account', () => {
+      const loginRes = login('alex', 'pine42');
+      const token = (loginRes!.body as { token: string }).token;
+      const headers = { authorization: `Bearer ${token}` };
+
+      const all = service.handle('auth', 'get', '/transactions', {}, {}, headers);
+      expect(all!.status).toBe(200);
+      expect((all!.body as unknown[]).length).toBe(5);
+
+      const savings = service.handle(
+        'auth',
+        'get',
+        '/transactions',
+        { accountId: 'acct-1002' },
+        {},
+        headers,
+      );
+      expect((savings!.body as unknown[]).length).toBe(2);
+    });
+
+    it('transfers money between the user accounts', () => {
+      const loginRes = login('alex', 'pine42');
+      const token = (loginRes!.body as { token: string }).token;
+      const headers = { authorization: `Bearer ${token}` };
+
+      const before = service.handle('auth', 'get', '/accounts', {}, {}, headers);
+      const checkingBefore = (before!.body as { id: string; balance: number }[]).find(
+        (a) => a.id === 'acct-1001',
+      )!.balance;
+
+      const transfer = service.handle(
+        'auth',
+        'post',
+        '/transfers',
+        {},
+        { fromAccountId: 'acct-1001', toAccountId: 'acct-1002', amount: 40 },
+        headers,
+      );
+      expect(transfer!.status).toBe(201);
+
+      const after = service.handle('auth', 'get', '/accounts', {}, {}, headers);
+      const checkingAfter = (after!.body as { id: string; balance: number }[]).find(
+        (a) => a.id === 'acct-1001',
+      )!.balance;
+      expect(checkingAfter).toBeCloseTo(checkingBefore - 40, 2);
+    });
+
+    it('rejects a transfer with insufficient funds', () => {
+      const loginRes = login('alex', 'pine42');
+      const token = (loginRes!.body as { token: string }).token;
+      const headers = { authorization: `Bearer ${token}` };
+
+      const r = service.handle(
+        'auth',
+        'post',
+        '/transfers',
+        {},
+        { fromAccountId: 'acct-1001', toAccountId: 'acct-1002', amount: 99999 },
+        headers,
+      );
+      expect(r!.status).toBe(400);
+      expect((r!.body as { error: string }).error).toContain('Insufficient funds');
     });
   });
 });

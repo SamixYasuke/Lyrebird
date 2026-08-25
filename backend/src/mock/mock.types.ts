@@ -10,6 +10,7 @@ export interface MockContext {
   params: Record<string, string>;
   query: Record<string, string>;
   body: Record<string, unknown>;
+  headers: Record<string, string>;
 }
 
 export interface MockRoute {

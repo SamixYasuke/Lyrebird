@@ -155,7 +155,7 @@ describe('AgentLoopService', () => {
     expect(result.reply).toBe('The API failed, please retry.');
   });
 
-  it('throws when the loop hits the iteration limit', async () => {
+  it('returns a graceful reply when the loop hits the iteration limit', async () => {
     const toolCall = {
       id: 'call_1',
       type: 'function' as const,
@@ -166,7 +166,9 @@ describe('AgentLoopService', () => {
     );
     executor.execute.mockResolvedValue({ ok: true, status: 200, data: {} });
 
-    await expect(service.run(context, history)).rejects.toThrow('iterations');
+    const result = await service.run(context, history);
+
+    expect(result.reply).toContain('trouble completing');
     expect(llm.chat).toHaveBeenCalledTimes(5);
   });
 
@@ -198,6 +200,40 @@ describe('AgentLoopService', () => {
 
     await expect(service.run(context, history)).rejects.toThrow('bad key');
     expect(llm.chat).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries the fallback model after a retryable error', async () => {
+    llm.chat
+      .mockRejectedValueOnce(new LlmError('rate limited', true, 429))
+      .mockRejectedValueOnce(new LlmError('rate limited', true, 429))
+      .mockResolvedValueOnce(
+        respond({ content: 'Recovered on the second fallback attempt.' }),
+      );
+
+    const result = await service.run(context, history);
+
+    expect(llm.chat).toHaveBeenCalledTimes(3);
+    expect(llm.chat).toHaveBeenNthCalledWith(
+      2,
+      'fallback-model',
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(llm.chat).toHaveBeenNthCalledWith(
+      3,
+      'fallback-model',
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(result.usedFallback).toBe(true);
+    expect(result.reply).toBe('Recovered on the second fallback attempt.');
+  });
+
+  it('rejects when both models keep returning retryable errors', async () => {
+    llm.chat.mockRejectedValue(new LlmError('rate limited', true, 429));
+
+    await expect(service.run(context, history)).rejects.toThrow('rate limited');
+    expect(llm.chat).toHaveBeenCalledTimes(3);
   });
 
   it('retries with the fallback model on an empty response', async () => {

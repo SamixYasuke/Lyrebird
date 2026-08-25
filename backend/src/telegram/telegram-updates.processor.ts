@@ -115,15 +115,30 @@ export class TelegramUpdatesProcessor extends WorkerHost {
       return;
     }
 
-    const tools = await this.tools.getTools(
-      serviceId,
-      this.crypto.decrypt(service.openapiSpec) ?? '',
-    );
     const chatId = message.chat.id;
     const botToken = this.crypto.decrypt(service.botToken) ?? '';
     const typing = this.startTyping(botToken, chatId);
     try {
+      const tools = await this.tools.getTools(
+        serviceId,
+        this.crypto.decrypt(service.openapiSpec) ?? '',
+      );
       await this.runPipeline(service, tools, text, chatId, botToken);
+    } catch (err) {
+      this.logger.error(
+        `Pipeline failed for service ${serviceId} chat ${chatId}: ${
+          err instanceof Error ? (err.stack ?? err.message) : String(err)
+        }`,
+      );
+      try {
+        await this.telegram.sendMessage(
+          botToken,
+          chatId,
+          "Something went wrong on my end while handling that. Please try again in a moment.",
+        );
+      } catch {
+        /* noop */
+      }
     } finally {
       clearInterval(typing);
     }

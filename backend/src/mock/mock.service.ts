@@ -56,6 +56,7 @@ export class MockService {
     path: string,
     query: Record<string, string>,
     body: Record<string, unknown>,
+    headers: Record<string, string> = {},
   ): { status: number; body: unknown } | undefined {
     const api = this.apis.get(slug);
     if (!api) return undefined;
@@ -65,7 +66,13 @@ export class MockService {
       if (route.method !== normalized) continue;
       const params = matchRoute(route.path, path);
       if (!params) continue;
-      const response = route.handler({ state: api.seed, params, query, body });
+      const response = route.handler({
+        state: api.seed,
+        params,
+        query,
+        body,
+        headers,
+      });
       return { status: response.status ?? 200, body: response.body };
     }
 

@@ -1,8 +1,10 @@
-import { MockApi, MockResponse } from '@/mock/mock.types';
+import { randomUUID } from 'node:crypto';
+import { MockApi, MockContext, MockResponse } from '@/mock/mock.types';
 
 const ok = (body: unknown, status = 200): MockResponse => ({ status, body });
 const created = (body: unknown): MockResponse => ({ status: 201, body });
 const bad = (message: string): MockResponse => ({ status: 400, body: { error: message } });
+const unauthorized = (message: string): MockResponse => ({ status: 401, body: { error: message } });
 const notFound = (message: string): MockResponse => ({ status: 404, body: { error: message } });
 const conflict = (message: string): MockResponse => ({ status: 409, body: { error: message } });
 
@@ -964,6 +966,340 @@ const DISPATCH_SPEC = {
   },
 };
 
+interface AuthTransaction {
+  id: string;
+  date: string;
+  description: string;
+  amount: number;
+}
+
+interface AuthAccount {
+  id: string;
+  label: string;
+  type: 'checking' | 'savings';
+  balance: number;
+  transactions: AuthTransaction[];
+}
+
+interface AuthUser {
+  id: string;
+  username: string;
+  password: string;
+  name: string;
+  accounts: AuthAccount[];
+}
+
+interface AuthState {
+  users: AuthUser[];
+  tokens: Record<string, string>;
+  transferCount: number;
+}
+
+const AUTH_SEED: AuthState = {
+  users: [
+    {
+      id: 'u-1',
+      username: 'alex',
+      password: 'pine42',
+      name: 'Alex Rivera',
+      accounts: [
+        {
+          id: 'acct-1001',
+          label: 'Checking',
+          type: 'checking',
+          balance: 1240.55,
+          transactions: [
+            { id: 'tx-9001', date: '2026-08-05', description: 'Payroll deposit', amount: 1800.0 },
+            { id: 'tx-9002', date: '2026-08-03', description: 'Rent payment', amount: -1100.0 },
+            { id: 'tx-9003', date: '2026-07-28', description: 'Grocery run', amount: -86.4 },
+          ],
+        },
+        {
+          id: 'acct-1002',
+          label: 'Savings',
+          type: 'savings',
+          balance: 4375.0,
+          transactions: [
+            { id: 'tx-9101', date: '2026-08-01', description: 'Monthly transfer in', amount: 250.0 },
+            { id: 'tx-9102', date: '2026-07-01', description: 'Monthly transfer in', amount: 250.0 },
+          ],
+        },
+      ],
+    },
+    {
+      id: 'u-2',
+      username: 'june',
+      password: 'sable77',
+      name: 'June Park',
+      accounts: [
+        {
+          id: 'acct-2001',
+          label: 'Checking',
+          type: 'checking',
+          balance: 820.1,
+          transactions: [
+            { id: 'tx-9201', date: '2026-08-06', description: 'Invoice #1182 payment', amount: 620.0 },
+            { id: 'tx-9202', date: '2026-08-02', description: 'Transfer out', amount: -40.0 },
+          ],
+        },
+      ],
+    },
+  ],
+  tokens: {},
+  transferCount: 0,
+};
+
+function authUserFor(ctx: MockContext, s: AuthState): AuthUser | undefined {
+  const header = (ctx.headers?.authorization ?? '')
+    .replace(/^Bearer\s+/i, '')
+    .trim();
+  if (!header) return undefined;
+  const userId = s.tokens[header];
+  return userId ? s.users.find((u) => u.id === userId) : undefined;
+}
+
+const publicUser = (user: AuthUser) => ({
+  id: user.id,
+  username: user.username,
+  name: user.name,
+  accounts: user.accounts.map((a) => ({
+    id: a.id,
+    label: a.label,
+    type: a.type,
+    balance: a.balance,
+  })),
+});
+
+function authRoutes(): MockApi['routes'] {
+  return [
+    {
+      method: 'post',
+      path: '/login',
+      handler: (ctx) => {
+        const s = ctx.state as AuthState;
+        const username = String(ctx.body.username ?? '');
+        const password = String(ctx.body.password ?? '');
+        const user = s.users.find(
+          (u) => u.username === username && u.password === password,
+        );
+        if (!user) return unauthorized('Invalid username or password');
+        const token = `tok_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
+        s.tokens[token] = user.id;
+        return ok({ token, tokenType: 'bearer', user: publicUser(user) });
+      },
+    },
+    {
+      method: 'get',
+      path: '/me',
+      handler: (ctx) => {
+        const s = ctx.state as AuthState;
+        const user = authUserFor(ctx, s);
+        if (!user) return unauthorized('Authentication required. Log in with POST /login first.');
+        return ok(publicUser(user));
+      },
+    },
+    {
+      method: 'get',
+      path: '/accounts',
+      handler: (ctx) => {
+        const s = ctx.state as AuthState;
+        const user = authUserFor(ctx, s);
+        if (!user) return unauthorized('Authentication required. Log in with POST /login first.');
+        return ok(user.accounts.map((a) => ({ id: a.id, label: a.label, type: a.type, balance: a.balance })));
+      },
+    },
+    {
+      method: 'get',
+      path: '/accounts/:accountId',
+      handler: (ctx) => {
+        const s = ctx.state as AuthState;
+        const user = authUserFor(ctx, s);
+        if (!user) return unauthorized('Authentication required. Log in with POST /login first.');
+        const account = user.accounts.find((a) => a.id === ctx.params.accountId);
+        if (!account) return notFound(`No account with id ${ctx.params.accountId} on this user`);
+        return ok(account);
+      },
+    },
+    {
+      method: 'get',
+      path: '/transactions',
+      handler: (ctx) => {
+        const s = ctx.state as AuthState;
+        const user = authUserFor(ctx, s);
+        if (!user) return unauthorized('Authentication required. Log in with POST /login first.');
+        const accountId = ctx.query.accountId;
+        const account = accountId
+          ? user.accounts.find((a) => a.id === accountId)
+          : undefined;
+        if (accountId && !account) return notFound(`No account with id ${accountId} on this user`);
+        const accounts = account ? [account] : user.accounts;
+        return ok(accounts.flatMap((a) => a.transactions.map((t) => ({ accountId: a.id, ...t }))));
+      },
+    },
+    {
+      method: 'post',
+      path: '/transfers',
+      handler: (ctx) => {
+        const s = ctx.state as AuthState;
+        const user = authUserFor(ctx, s);
+        if (!user) return unauthorized('Authentication required. Log in with POST /login first.');
+        const fromId = String(ctx.body.fromAccountId ?? '');
+        const toId = String(ctx.body.toAccountId ?? '');
+        const amount = Number(ctx.body.amount ?? NaN);
+        const from = user.accounts.find((a) => a.id === fromId);
+        const to = user.accounts.find((a) => a.id === toId);
+        if (!from || !to) return bad('Unknown account id — use one of your own accounts');
+        if (from.id === to.id) return bad('Cannot transfer to the same account');
+        if (!Number.isFinite(amount) || amount <= 0) {
+          return bad('amount must be a positive number');
+        }
+        const rounded = Math.round(amount * 100) / 100;
+        if (from.balance < rounded) {
+          return bad(
+            `Insufficient funds — ${from.label} only has $${from.balance.toFixed(2)}`,
+          );
+        }
+        s.transferCount += 1;
+        const date = new Date().toISOString().slice(0, 10);
+        from.balance = Math.round((from.balance - rounded) * 100) / 100;
+        to.balance = Math.round((to.balance + rounded) * 100) / 100;
+        from.transactions.push({
+          id: `tx-${9000 + s.transferCount}`,
+          date,
+          description: `Transfer to ${to.label}`,
+          amount: -rounded,
+        });
+        to.transactions.push({
+          id: `tx-${9100 + s.transferCount}`,
+          date,
+          description: `Transfer from ${from.label}`,
+          amount: rounded,
+        });
+        return created({
+          ok: true,
+          fromAccountId: from.id,
+          toAccountId: to.id,
+          amount: rounded,
+        });
+      },
+    },
+  ];
+}
+
+const AUTH_SPEC = {
+  openapi: '3.0.3',
+  info: { title: 'Ledger & Co Banking API', version: '1.0.0' },
+  components: {
+    securitySchemes: {
+      BearerAuth: { type: 'http', scheme: 'bearer' },
+    },
+  },
+  security: [{ BearerAuth: [] }],
+  paths: {
+    '/login': {
+      post: {
+        operationId: 'login',
+        summary: 'Log in and get a token',
+        description:
+          'Authenticates with a username and password and returns a bearer token. ' +
+          'Test accounts: username "alex" password "pine42", username "june" password ' +
+          '"sable77". Every other endpoint requires the returned token.',
+        security: [],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['username', 'password'],
+                properties: {
+                  username: { type: 'string', description: 'Your username (e.g. alex).' },
+                  password: { type: 'string', description: 'Your password.' },
+                },
+              },
+            },
+          },
+        },
+        responses: { '200': { description: 'Logged in' }, '401': { description: 'Bad credentials' } },
+      },
+    },
+    '/me': {
+      get: {
+        operationId: 'getMe',
+        summary: 'Get your profile',
+        description: 'Returns the profile and accounts of the currently logged-in user.',
+        responses: { '200': { description: 'ok' }, '401': { description: 'Unauthenticated' } },
+      },
+    },
+    '/accounts': {
+      get: {
+        operationId: 'listAccounts',
+        summary: 'List your accounts',
+        description: 'Returns your accounts with their current balances.',
+        responses: { '200': { description: 'ok' }, '401': { description: 'Unauthenticated' } },
+      },
+    },
+    '/accounts/{accountId}': {
+      get: {
+        operationId: 'getAccount',
+        summary: 'Get an account and its transactions',
+        description: 'Returns one of your accounts including its recent transactions.',
+        parameters: [
+          {
+            name: 'accountId',
+            in: 'path',
+            required: true,
+            description: 'The account id (e.g. acct-1001).',
+            schema: { type: 'string' },
+          },
+        ],
+        responses: { '200': { description: 'ok' }, '401': { description: 'Unauthenticated' } },
+      },
+    },
+    '/transactions': {
+      get: {
+        operationId: 'listTransactions',
+        summary: 'List transactions',
+        description: 'Returns your recent transactions, optionally filtered by account.',
+        parameters: [
+          {
+            name: 'accountId',
+            in: 'query',
+            required: false,
+            description: 'Filter by account id.',
+            schema: { type: 'string' },
+          },
+        ],
+        responses: { '200': { description: 'ok' }, '401': { description: 'Unauthenticated' } },
+      },
+    },
+    '/transfers': {
+      post: {
+        operationId: 'createTransfer',
+        summary: 'Transfer money between your accounts',
+        description: 'Moves money between two of your own accounts. Mutates your balances.',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['fromAccountId', 'toAccountId', 'amount'],
+                properties: {
+                  fromAccountId: { type: 'string', description: 'Source account id.' },
+                  toAccountId: { type: 'string', description: 'Destination account id.' },
+                  amount: { type: 'number', minimum: 0, description: 'Amount in dollars.' },
+                },
+              },
+            },
+          },
+        },
+        responses: { '201': { description: 'Transferred' }, '400': { description: 'Bad request' }, '401': { description: 'Unauthenticated' } },
+      },
+    },
+  },
+};
+
 export function createMockApis(): MockApi[] {
   return [
     {
@@ -1009,6 +1345,20 @@ export function createMockApis(): MockApi[] {
       spec: DISPATCH_SPEC,
       seed: JSON.parse(JSON.stringify(DISPATCH_SEED)),
       routes: dispatchRoutes(),
+    },
+    {
+      slug: 'auth',
+      name: 'Ledger & Co Bank',
+      blurb: 'A banking API that requires authentication on every request: log in for a bearer token, then check balances, transactions and make transfers.',
+      samplePrompts: [
+        'Log me in as alex with password pine42',
+        'What is my current balance?',
+        'Show my checking account transactions',
+        'Transfer $40 from checking to savings',
+      ],
+      spec: AUTH_SPEC,
+      seed: JSON.parse(JSON.stringify(AUTH_SEED)),
+      routes: authRoutes(),
     },
   ];
 }

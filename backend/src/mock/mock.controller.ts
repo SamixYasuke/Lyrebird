@@ -59,12 +59,19 @@ export class MockController {
         Array.isArray(value) ? value.join(',') : String(value),
       ]),
     );
+    const headers = Object.fromEntries(
+      Object.entries(req.headers).map(([key, value]) => [
+        key,
+        Array.isArray(value) ? value.join(',') : String(value ?? ''),
+      ]),
+    );
     const result = this.mock.handle(
       slug,
       req.method,
       path,
       query,
       (req.body ?? {}) as Record<string, unknown>,
+      headers,
     );
     if (!result) throw new NotFoundException(`No mock API "${slug}"`);
     res.status(result.status);

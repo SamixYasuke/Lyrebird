@@ -116,6 +116,21 @@ describe('LlmService', () => {
     });
   });
 
+  it('captures the Retry-After header on a 429', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 429,
+      headers: { get: jest.fn().mockReturnValue('5') },
+    });
+
+    await expect(
+      service.chat('model-x', [{ role: 'user', content: 'hi' }], []),
+    ).rejects.toMatchObject<Partial<LlmError>>({
+      retryable: true,
+      retryAfterSeconds: 5,
+    });
+  });
+
   it('marks 401 responses as non-retryable', async () => {
     mockFetch.mockResolvedValue({ ok: false, status: 401 });
 

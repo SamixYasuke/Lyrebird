@@ -10,6 +10,7 @@ export class LlmError extends Error {
     message: string,
     public readonly retryable: boolean,
     public readonly status?: number,
+    public readonly retryAfterSeconds?: number,
   ) {
     super(message);
     this.name = 'LlmError';
@@ -62,10 +63,15 @@ export class LlmService {
 
     if (!response.ok) {
       const retryable = response.status === 429 || response.status >= 500;
+      const retryAfter = response.headers?.get?.('Retry-After') ?? null;
+      const parsed = retryAfter ? Number(retryAfter) : NaN;
+      const retryAfterSeconds =
+        Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
       throw new LlmError(
         `OpenRouter returned ${response.status}`,
         retryable,
         response.status,
+        retryAfterSeconds,
       );
     }
 

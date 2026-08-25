@@ -12,6 +12,13 @@ import { ToolExecutorService } from '@/agents/tool-executor.service';
 
 const MAX_ITERATIONS = 5;
 
+const FALLBACK_RETRY_ATTEMPTS = 2;
+const RETRY_BACKOFF_MS = 1000;
+const MAX_BACKOFF_MS = 10000;
+
+const LOOP_LIMIT_REPLY =
+  "I had trouble completing that in a single go. Could you rephrase it or break it into smaller steps?";
+
 export interface AgentResult {
   reply: string;
   iterations: number;
@@ -123,9 +130,12 @@ export class AgentLoopService {
       };
     }
 
-    throw new Error(
-      `Agent loop exceeded ${MAX_ITERATIONS} iterations without reaching a final answer`,
-    );
+    return {
+      reply: LOOP_LIMIT_REPLY,
+      iterations,
+      usedFallback,
+      toolCalls,
+    };
   }
 
   private async callModel(
@@ -142,20 +152,45 @@ export class AgentLoopService {
       return { result, usedFallback };
     } catch (err) {
       if (
-        err instanceof LlmError &&
-        err.retryable &&
-        !usedFallback &&
-        context.fallbackModel
+        !(err instanceof LlmError) ||
+        !err.retryable ||
+        usedFallback ||
+        !context.fallbackModel
       ) {
-        const result = await this.llm.chat(
-          context.fallbackModel,
-          messages,
-          context.tools,
-        );
-        return { result, usedFallback: true };
+        throw err;
+      }
+      for (let attempt = 0; attempt < FALLBACK_RETRY_ATTEMPTS; attempt++) {
+        try {
+          const result = await this.llm.chat(
+            context.fallbackModel,
+            messages,
+            context.tools,
+          );
+          return { result, usedFallback: true };
+        } catch (fallbackErr) {
+          if (!(fallbackErr instanceof LlmError) || !fallbackErr.retryable) {
+            throw fallbackErr;
+          }
+          if (attempt < FALLBACK_RETRY_ATTEMPTS - 1) {
+            await this.sleep(this.backoffMs(fallbackErr));
+          } else {
+            throw fallbackErr;
+          }
+        }
       }
       throw err;
     }
+  }
+
+  private backoffMs(err: LlmError): number {
+    const retryAfter = err.retryAfterSeconds
+      ? err.retryAfterSeconds * 1000
+      : RETRY_BACKOFF_MS;
+    return Math.min(retryAfter, MAX_BACKOFF_MS);
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private async executeToolCall(
