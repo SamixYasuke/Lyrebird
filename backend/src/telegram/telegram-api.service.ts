@@ -37,9 +37,11 @@ export class TelegramApiService {
     chatId: number,
     text: string,
   ): Promise<boolean> {
+    const html = markdownToTelegramHtml(text);
+    this.logger.log(`[TG] sendMessage to chat ${chatId}: input=${text.length} chars, html=${html.length} chars`);
     const payload = {
       chat_id: chatId,
-      text: markdownToTelegramHtml(text),
+      text: html,
       parse_mode: 'HTML',
     };
     try {
@@ -53,7 +55,7 @@ export class TelegramApiService {
       );
       if (!response.ok && response.status === 400) {
         this.logger.warn(
-          `Telegram rejected HTML for chat ${chatId}, retrying as plain text`,
+          `[TG] Telegram rejected HTML for chat ${chatId}, retrying as plain text`,
         );
         response = await fetch(
           `https://api.telegram.org/bot${botToken}/sendMessage`,
@@ -65,14 +67,16 @@ export class TelegramApiService {
         );
       }
       if (!response.ok) {
+        const body = await response.text().catch(() => '<unreadable>');
         this.logger.warn(
-          `Telegram sendMessage failed: ${response.status} for chat ${chatId}`,
+          `[TG] sendMessage FAILED: status=${response.status} chat=${chatId} body=${body.slice(0, 300)}`,
         );
         return false;
       }
+      this.logger.log(`[TG] sendMessage OK: chat=${chatId}`);
       return true;
-    } catch {
-      this.logger.error('Telegram sendMessage network error');
+    } catch (err) {
+      this.logger.error(`[TG] sendMessage network error: ${err instanceof Error ? err.message : String(err)}`);
       return false;
     }
   }

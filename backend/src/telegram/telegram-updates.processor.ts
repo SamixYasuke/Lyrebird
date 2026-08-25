@@ -108,25 +108,33 @@ export class TelegramUpdatesProcessor extends WorkerHost {
     if (!message?.text || !message.chat) return;
 
     const text = normalizeText(message.text);
+    this.logger.log(`[PIPELINE] Job received: service=${serviceId} chat=${message.chat.id} text="${text.slice(0, 80)}"`);
 
     const service = await this.services.findOne({ where: { id: serviceId } });
     if (!service) {
-      this.logger.warn(`Service ${serviceId} not found`);
+      this.logger.warn(`[PIPELINE] Service ${serviceId} not found`);
       return;
     }
+    this.logger.log(`[PIPELINE] Service found: baseUrl=${service.baseUrl}`);
 
     const chatId = message.chat.id;
     const botToken = this.crypto.decrypt(service.botToken) ?? '';
+    if (!botToken) {
+      this.logger.error(`[PIPELINE] Failed to decrypt bot token for service ${serviceId}`);
+      return;
+    }
+    this.logger.log(`[PIPELINE] Bot token decrypted, starting typing indicator`);
     const typing = this.startTyping(botToken, chatId);
     try {
-      const tools = await this.tools.getTools(
-        serviceId,
-        this.crypto.decrypt(service.openapiSpec) ?? '',
-      );
+      const spec = this.crypto.decrypt(service.openapiSpec) ?? '';
+      this.logger.log(`[PIPELINE] Spec length: ${spec.length} chars`);
+      const tools = await this.tools.getTools(serviceId, spec);
+      this.logger.log(`[PIPELINE] Tools loaded: ${tools.length} tools`);
       await this.runPipeline(service, tools, text, chatId, botToken);
+      this.logger.log(`[PIPELINE] Pipeline completed successfully`);
     } catch (err) {
       this.logger.error(
-        `Pipeline failed for service ${serviceId} chat ${chatId}: ${
+        `[PIPELINE] FAILED for service ${serviceId} chat ${chatId}: ${
           err instanceof Error ? (err.stack ?? err.message) : String(err)
         }`,
       );
@@ -136,8 +144,8 @@ export class TelegramUpdatesProcessor extends WorkerHost {
           chatId,
           "Something went wrong on my end while handling that. Please try again in a moment.",
         );
-      } catch {
-        /* noop */
+      } catch (sendErr) {
+        this.logger.error(`[PIPELINE] Even fallback message failed: ${sendErr instanceof Error ? sendErr.message : String(sendErr)}`);
       }
     } finally {
       clearInterval(typing);
@@ -158,13 +166,16 @@ export class TelegramUpdatesProcessor extends WorkerHost {
     chatId: number,
     botToken: string,
   ): Promise<void> {
+    this.logger.log(`[PIPELINE] Loading session for service ${service.id} chat ${chatId}`);
     const state = await this.sessions.getSession(service.id, chatId);
+    this.logger.log(`[PIPELINE] Session loaded: ${state.history.length} history msgs, summary=${!!state.summary}`);
     const userMessage = { role: 'user' as const, content: text };
 
     const pending = await this.sessions.getPendingConfirmation(
       service.id,
       chatId,
     );
+    this.logger.log(`[PIPELINE] Pending confirmation: ${pending ? pending.toolCall.function.name : 'none'}`);
     const runMessages: ChatMessage[] = [
       ...(state.summary
         ? [
@@ -187,6 +198,7 @@ export class TelegramUpdatesProcessor extends WorkerHost {
         'nvidia/nemotron-3-nano-30b-a3b:free',
       fallbackModel: this.config.get<string>('OPENROUTER_FALLBACK_MODEL'),
     };
+    this.logger.log(`[PIPELINE] Context: model=${context.model} fallback=${context.fallbackModel} baseUrl=${context.baseUrl}`);
 
     let pendingMutations: ToolCall[] | undefined;
     let keptPending: PendingConfirmation | null = null;
@@ -218,6 +230,7 @@ export class TelegramUpdatesProcessor extends WorkerHost {
       }
     }
 
+    this.logger.log(`[PIPELINE] Calling agent loop (${runMessages.length} messages)...`);
     let result: AgentResult;
     if (directReply) {
       result = {
@@ -232,6 +245,7 @@ export class TelegramUpdatesProcessor extends WorkerHost {
         runMessages,
       );
     }
+    this.logger.log(`[PIPELINE] Agent returned: reply=${result.reply.length} chars, iterations=${result.iterations}, fallback=${result.usedFallback}, pending=${!!result.pendingToolCall}`);
 
     if (result.pendingToolCall) {
       await this.sessions.setPendingConfirmation(service.id, chatId, {
@@ -245,12 +259,15 @@ export class TelegramUpdatesProcessor extends WorkerHost {
       await this.sessions.setPendingConfirmation(service.id, chatId, null);
     }
 
+    this.logger.log(`[PIPELINE] Appending to session history`);
     await this.sessions.append(service.id, chatId, userMessage, {
       role: 'assistant',
       content: result.reply,
     });
 
-    await this.telegram.sendMessage(botToken, chatId, result.reply);
+    this.logger.log(`[PIPELINE] Sending reply to chat ${chatId} (${result.reply.length} chars)`);
+    const sent = await this.telegram.sendMessage(botToken, chatId, result.reply);
+    this.logger.log(`[PIPELINE] sendMessage returned: ${sent}`);
   }
 
   private async decideConfirmIntent(

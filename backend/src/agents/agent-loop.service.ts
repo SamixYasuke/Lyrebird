@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import {
   AgentContext,
   ChatMessage,
@@ -30,6 +30,8 @@ export interface AgentResult {
 
 @Injectable()
 export class AgentLoopService {
+  private readonly logger = new Logger(AgentLoopService.name);
+
   constructor(
     private readonly llm: LlmService,
     private readonly executor: ToolExecutorService,
@@ -39,6 +41,7 @@ export class AgentLoopService {
     context: AgentContext,
     history: ChatMessage[],
   ): Promise<AgentResult> {
+    this.logger.log(`[AGENT] Starting loop: model=${context.model} tools=${context.tools.length} messages=${history.length}`);
     const messages: ChatMessage[] = [
       this.buildSystemPrompt(context),
       ...history,
@@ -48,8 +51,11 @@ export class AgentLoopService {
     let iterations = 0;
 
     for (; iterations < MAX_ITERATIONS; iterations++) {
+      this.logger.log(`[AGENT] Iteration ${iterations + 1}/${MAX_ITERATIONS}`);
       const response = await this.callModel(context, messages, usedFallback);
       usedFallback = usedFallback || response.usedFallback;
+
+      this.logger.log(`[AGENT] LLM response: content=${response.result.content?.length ?? 0} chars, toolCalls=${response.result.toolCalls.length}, model=${response.result.model}`);
 
       if (response.result.toolCalls.length > 0) {
         messages.push({
@@ -143,14 +149,18 @@ export class AgentLoopService {
     messages: ChatMessage[],
     usedFallback: boolean,
   ): Promise<{ result: LlmResponse; usedFallback: boolean }> {
+    const model = usedFallback ? (context.fallbackModel ?? context.model) : context.model;
+    this.logger.log(`[AGENT] Calling LLM: model=${model} messages=${messages.length} tools=${context.tools.length}`);
     try {
       const result = await this.llm.chat(
         context.model,
         messages,
         context.tools,
       );
+      this.logger.log(`[AGENT] LLM returned OK: content=${result.content?.length ?? 0} chars, toolCalls=${result.toolCalls.length}`);
       return { result, usedFallback };
     } catch (err) {
+      this.logger.error(`[AGENT] LLM call failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
       if (
         !(err instanceof LlmError) ||
         !err.retryable ||
