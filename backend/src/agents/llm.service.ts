@@ -66,7 +66,7 @@ export class LlmService {
 
     this.logger.log(`[LLM] Response status: ${response.status}`);
     if (!response.ok) {
-      const retryable = response.status === 429 || response.status >= 500;
+      const retryable = response.status === 429 || response.status === 404 || response.status >= 500;
       const retryAfter = response.headers?.get?.('Retry-After') ?? null;
       const parsed = retryAfter ? Number(retryAfter) : NaN;
       const retryAfterSeconds =
